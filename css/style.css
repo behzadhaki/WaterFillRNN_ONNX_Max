@@ -1,0 +1,49 @@
+:root {
+  --bg: #0f1115;
+  --card: #171a21;
+  --text: #e8eaf0;
+  --muted: #aab1c3;
+  --accent: #6ee7b7;
+  --accent-hi: #34d399;
+}
+* { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; }
+body { margin: 0; background: var(--bg); color: var(--text); display: grid; place-items: center; min-height: 100dvh; }
+.card {
+  width: min(520px, 92vw);
+  background: linear-gradient(180deg, #141820 0%, #10131a 100%);
+  border: 1px solid #222633;
+  border-radius: 20px;
+  padding: 18px 18px 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.title { font-weight: 650; font-size: 20px; letter-spacing: .2px; }
+.sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.hr { height: 1px; background: #222633; margin: 14px 0; border-radius: 1px; }
+.btn {
+  appearance: none; border: 0; border-radius: 12px; padding: 10px 16px;
+  background: var(--accent); color: #0a0d12; font-weight: 700; cursor: pointer;
+  transition: transform .06s ease, background .2s ease;
+}
+.btn:hover { background: var(--accent-hi); transform: translateY(-1px); }
+.btn.secondary {
+  background: #2b3242; color: var(--text); font-weight: 600;
+}
+.btn.secondary:hover { background: #343d52; }
+.slider-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
+input[type="range"] {
+  width: 100%; height: 6px; border-radius: 999px; background: #232939; outline: none;
+  -webkit-appearance: none; appearance: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #0a0d12; cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(110,231,183,.2);
+}
+.value-pill {
+  min-width: 64px; padding: 6px 10px; text-align: center; font-variant-numeric: tabular-nums;
+  border: 1px solid #273047; border-radius: 10px; color: var(--muted);
+}
+.footer { display:flex; justify-content: space-between; align-items:center; margin-top: 10px; color: var(--muted); font-size: 12px; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }

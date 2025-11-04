@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WaterFill RNN</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="card" id="soundCard">
+    <div class="row">
+      <div>
+        <div class="title">WaterFill (RNN)</div>
+        <div class="sub">Generative “filling a cup” — ONNX Runtime (Web)</div>
+      </div>
+      <button id="playBtn" class="btn">Play</button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="row" style="margin: 6px 0 10px;">
+      <div class="sub">Conditioning</div>
+      <button id="stopBtn" class="btn secondary">Stop</button>
+    </div>
+
+    <div class="slider-row">
+      <input id="fillSlider" type="range" min="0" max="1" step="0.001" value="0.5" />
+      <div class="value-pill"><span id="fillVal">0.50</span></div>
+    </div>
+
+    <div class="footer">
+      <div id="status">status: <em>idle</em></div>
+    </div>
+  </div>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
