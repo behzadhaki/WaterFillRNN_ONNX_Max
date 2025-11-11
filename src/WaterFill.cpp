@@ -640,7 +640,7 @@ private:
 // ============================================================================
 // Max/MSP External Class
 // ============================================================================
-class waterfill_rnn : public object<waterfill_rnn>, public sample_operator<1, 1> {
+class waterfill_rnn : public object<waterfill_rnn>, public sample_operator<0, 1> {
 private:
     std::unique_ptr<RNNWorker> worker_;
 
@@ -669,7 +669,6 @@ public:
     MIN_AUTHOR{"Cycling '74"};
     MIN_RELATED{"gt.muteGenreLatentEncoder"};
 
-    inlet<> input{this, "(signal) Trigger (not used, generates internally)"};
     outlet<> output{this, "(signal) Generated audio", "signal"};
     outlet<> status_out{this, "(message) Status messages"};
 
@@ -802,7 +801,7 @@ public:
     };
 
     // Audio processing (called per sample)
-    sample operator()(sample input) {
+    sample operator()() {
         if (!active_ || !initialized_) {
             return 0.0;
         }
