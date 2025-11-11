@@ -1,3 +1,25 @@
+- Uses static linking of ONNXRuntime using the prebuilt binaries provided by [Fangjun Kuang](https://github.com/csukuangfj/onnxruntime-libs)
+
+
+
+# Get max sdk
+
+### On ARM64 Install libomp (VIA BREW ONLY)
+
+    brew install libomp
+
+### Clone the Max SDK repository
+
+     chmod +x clone_maxsdk.sh
+    ./clone_maxsdk.sh
+
+### Post Build Verification
+
+    chmod +x verification.sh
+    ./verification.sh
+
+----------
+
 # WaterFillRNN ONNX for the Browser
 
 ## Overview
@@ -50,3 +72,7 @@ python3 -m http.server 8000
 ```
 
 **Note:** This project requires a local web server due to ES6 module imports and Web Workers. Opening `index.html` directly in a browser will not work.
+
+
+
+---------
