@@ -722,7 +722,8 @@ private:
         std::vector<Ort::Value> inputs;
         inputs.push_back(std::move(codes_tensor));
 
-        const char* output_names[] = {"audio"};
+        // Try different output names - the JavaScript version handles multiple possibilities
+        const char* output_names[] = {"audio_out"};  // Changed from "audio" to "audio_out"
 
         auto outputs = decoder_session_->Run(
             Ort::RunOptions{nullptr},
