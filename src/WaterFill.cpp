@@ -99,6 +99,61 @@ public:
 };
 
 // ============================================================================
+// Fixed Ring Buffer Implementation
+// ============================================================================
+class FixedRingBuffer {
+private:
+    std::vector<float> buffer_;
+    size_t write_ptr_ = 0;
+    size_t read_ptr_ = 0;
+    size_t available_ = 0;
+    size_t size_;
+    std::mutex mutex_;
+
+public:
+    FixedRingBuffer(size_t size) : size_(size) {
+        buffer_.resize(size, 0.0f);
+    }
+
+    void write(const float* data, size_t count) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (size_t i = 0; i < count; i++) {
+            buffer_[write_ptr_] = data[i];
+            write_ptr_ = (write_ptr_ + 1) % size_;
+            if (available_ < size_) {
+                available_++;
+            } else {
+                // Buffer full, overwrite oldest
+                read_ptr_ = (read_ptr_ + 1) % size_;
+            }
+        }
+    }
+
+    bool read(float& sample) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (available_ > 0) {
+            sample = buffer_[read_ptr_];
+            read_ptr_ = (read_ptr_ + 1) % size_;
+            available_--;
+            return true;
+        }
+        return false;
+    }
+
+    size_t available() const {
+        return available_;
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::fill(buffer_.begin(), buffer_.end(), 0.0f);
+        write_ptr_ = 0;
+        read_ptr_ = 0;
+        available_ = 0;
+    }
+};
+
+// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -323,6 +378,14 @@ private:
     ThreadSafeQueue<Message> input_queue_;
     ThreadSafeQueue<Message> output_queue_;
 
+    // Add proper error handling
+    void send_error(const std::string& error_msg) {
+        Message error;
+        error.type = MessageType::ERROR;
+        error.error_msg = error_msg;
+        output_queue_.push(error);
+    }
+
 public:
     RNNWorker() : env_(nullptr) {}
 
@@ -486,12 +549,15 @@ public:
     }
 
 private:
+    // More robust worker loop
     void worker_loop() {
+        std::cout << "[RNNWorker] Worker thread started" << std::endl;
+
         while (running_) {
             Message msg;
 
-            // Wait for incoming message
-            if (!input_queue_.wait_pop(msg, 100)) {
+            // Wait for incoming message with shorter timeout
+            if (!input_queue_.wait_pop(msg, 50)) {
                 continue;
             }
 
@@ -500,46 +566,68 @@ private:
             }
 
             if (msg.type == MessageType::REQUEST_HOP) {
-                process_hop_request(msg.conditioning_value);
+                try {
+                    process_hop_request(msg.conditioning_value);
+                } catch (const std::exception& e) {
+                    send_error(std::string("Process hop failed: ") + e.what());
+                }
             }
         }
 
-        std::cout << "Worker thread exiting" << std::endl;
+        std::cout << "[RNNWorker] Worker thread exiting" << std::endl;
     }
 
+    // Improved hop processing with better error handling
     void process_hop_request(float conditioning) {
-        try {
-            // Generate HOP_FRAMES worth of codes
-            for (int hop = 0; hop < HOP_FRAMES; hop++) {
-                std::vector<int> codes = rnn_step(conditioning);
-                push_codes_to_fifo(codes);
-            }
-
-            // Decode the full chunk
-            std::vector<float> audio_24k = decode_chunk();
-
-            // Extract tail (last HOP_FRAMES worth)
-            size_t tail_start = audio_24k.size() - HOP_SAMPLES_24K;
-            std::vector<float> tail_24k(audio_24k.begin() + tail_start, audio_24k.end());
-
-            // Upsample to 48kHz
-            std::vector<float> audio_48k = upsample_2x_linear(tail_24k.data(), tail_24k.size());
-
-            // Send result back
-            Message result;
-            result.type = MessageType::AUDIO_HOP;
-            result.audio_data = std::move(audio_48k);
-            output_queue_.push(result);
-
-        } catch (const std::exception& e) {
-            Message error;
-            error.type = MessageType::ERROR;
-            error.error_msg = std::string("Processing error: ") + e.what();
-            output_queue_.push(error);
+        // Validate conditioning value
+        if (conditioning < 0.0f || conditioning > 1.0f) {
+            conditioning = std::max(0.0f, std::min(1.0f, conditioning));
         }
+
+        // Generate HOP_FRAMES worth of codes
+        std::vector<std::vector<int>> all_codes;
+        for (int hop = 0; hop < HOP_FRAMES; hop++) {
+            try {
+                std::vector<int> codes = rnn_step(conditioning);
+                all_codes.push_back(codes);
+                push_codes_to_fifo(codes);
+            } catch (const std::exception& e) {
+                throw std::runtime_error(std::string("RNN step failed: ") + e.what());
+            }
+        }
+
+        // Decode the full chunk
+        std::vector<float> audio_24k;
+        try {
+            audio_24k = decode_chunk();
+        } catch (const std::exception& e) {
+            throw std::runtime_error(std::string("Decode failed: ") + e.what());
+        }
+
+        // Validate audio size
+        if (audio_24k.size() < HOP_SAMPLES_24K) {
+            throw std::runtime_error("Decoded audio too short");
+        }
+
+        // Extract tail (last HOP_FRAMES worth)
+        size_t tail_start = audio_24k.size() - HOP_SAMPLES_24K;
+        std::vector<float> tail_24k(audio_24k.begin() + tail_start, audio_24k.end());
+
+        // Upsample to 48kHz
+        std::vector<float> audio_48k = upsample_2x_linear(tail_24k.data(), tail_24k.size());
+
+        // Send result back
+        Message result;
+        result.type = MessageType::AUDIO_HOP;
+        result.audio_data = std::move(audio_48k);
+        output_queue_.push(result);
+
+        std::cout << "[RNNWorker] Sent audio hop: " << result.audio_data.size() << " samples" << std::endl;
     }
 
     std::vector<int> rnn_step(float conditioning) {
+        std::cout << "[RNNWorker] Running RNN step, conditioning: " << conditioning << std::endl;
+
         // Prepare inputs
         std::vector<float> cond_vec = {conditioning};
 
@@ -594,6 +682,13 @@ private:
         // Clamp and scale for next iteration
         clamp_and_scale_128(new_latent.data(), last_latent_.data());
 
+        // Add debug output after sampling
+        std::cout << "[RNNWorker] Sampled codes: ";
+        for (int code : sampled_codes) {
+            std::cout << code << " ";
+        }
+        std::cout << std::endl;
+
         return sampled_codes;
     }
 
@@ -605,6 +700,8 @@ private:
     }
 
     std::vector<float> decode_chunk() {
+        std::cout << "[RNNWorker] Decoding chunk..." << std::endl;
+
         // Build input tensor [1, NQ, CHUNK_FRAMES] in q-major, time order
         std::vector<int64_t> codes_3d(1 * NQ * CHUNK_FRAMES);
 
@@ -633,7 +730,10 @@ private:
             output_names, 1);
 
         // Use helper function to extract tensor data
-        return tensor_to_vector(outputs[0]);
+        auto audio = tensor_to_vector(outputs[0]);
+        std::cout << "[RNNWorker] Decoded " << audio.size() << " samples" << std::endl;
+
+        return audio;
     }
 };
 
@@ -643,17 +743,11 @@ private:
 class waterfill_rnn : public object<waterfill_rnn>, public sample_operator<0, 1> {
 private:
     std::unique_ptr<RNNWorker> worker_;
-
-    // Circular audio buffer (ring buffer for generated audio)
-    static constexpr size_t RING_BUFFER_SIZE = 10240;  // ~16 RNN steps at 48kHz
-    std::vector<float> ring_buffer_;
-    size_t write_ptr_ = 0;
-    size_t read_ptr_ = 0;
-    size_t available_ = 0;
+    FixedRingBuffer ring_buffer_;  // Use fixed implementation
 
     // Flow control
-    size_t low_water_mark_ = RING_BUFFER_SIZE / 2;
-    bool hop_requested_ = false;
+    size_t low_water_mark_;
+    std::atomic<bool> hop_requested_{false};
 
     // State
     std::atomic<bool> active_{false};
@@ -690,15 +784,16 @@ public:
             active_ = (bool)args[0];
             if (!active_) {
                 // Clear buffer when stopping
-                clear_ring_buffer();
+                ring_buffer_.clear();
             }
             return args;
         }}
     };
 
-    // Constructor
-    waterfill_rnn(const atoms& args = {}) {
-        ring_buffer_.resize(RING_BUFFER_SIZE, 0.0f);
+    // Constructor - use fixed ring buffer
+    waterfill_rnn(const atoms& args = {})
+        : ring_buffer_(10240),  // Same size as before
+          low_water_mark_(10240 / 2) {
 
         // Get resources path using helper
         resources_path_ = BundleResourceLoader::get_package_resources_path();
@@ -758,6 +853,9 @@ public:
         }
 
         cout << "Resource check complete." << c74::min::endl;
+
+        // Initialize worker immediately
+        initialize_worker();
     }
 
     // Destructor
@@ -800,7 +898,7 @@ public:
         }
     };
 
-    // Audio processing (called per sample)
+    // Improved audio processing
     sample operator()() {
         if (!active_ || !initialized_) {
             return 0.0;
@@ -811,14 +909,12 @@ public:
 
         // Read from ring buffer
         float output_sample = 0.0f;
-        if (available_ > 0) {
-            output_sample = ring_buffer_[read_ptr_];
-            read_ptr_ = (read_ptr_ + 1) % RING_BUFFER_SIZE;
-            available_--;
+        if (!ring_buffer_.read(output_sample)) {
+            output_sample = 0.0f;
         }
 
-        // Request new hop if running low
-        if (!hop_requested_ && available_ < low_water_mark_) {
+        // Request new hop if running low and not already requested
+        if (!hop_requested_ && ring_buffer_.available() < low_water_mark_) {
             request_audio_hop();
         }
 
@@ -827,6 +923,8 @@ public:
 
 private:
     void initialize_worker() {
+        std::cout << "Initializing RNN worker..." << std::endl;
+
         if (resources_path_.empty()) {
             status_out.send("error", "Resources path not found");
             return;
@@ -835,7 +933,11 @@ private:
         // Shutdown existing worker
         if (worker_) {
             worker_->shutdown();
+            worker_.reset();
         }
+
+        // Clear buffer
+        ring_buffer_.clear();
 
         // Create and initialize new worker
         worker_ = std::make_unique<RNNWorker>();
@@ -843,6 +945,7 @@ private:
         if (worker_->initialize(resources_path_)) {
             worker_->start();
             initialized_ = true;
+            hop_requested_ = false;
 
             // Pre-fill with first hop
             request_audio_hop();
@@ -858,10 +961,11 @@ private:
     }
 
     void request_audio_hop() {
-        if (!worker_ || !initialized_) return;
+        if (!worker_ || !initialized_ || hop_requested_) return;
 
         hop_requested_ = true;
         worker_->request_hop(conditioning_value_);
+        std::cout << "Requested audio hop, conditioning: " << conditioning_value_ << std::endl;
     }
 
     void process_worker_messages() {
@@ -877,6 +981,7 @@ private:
                 case MessageType::ERROR:
                     status_out.send("error", msg.error_msg);
                     cerr << "Worker error: " << msg.error_msg << c74::min::endl;
+                    hop_requested_ = false;  // Reset request flag on error
                     break;
 
                 default:
@@ -886,27 +991,16 @@ private:
     }
 
     void receive_audio_hop(const std::vector<float>& audio) {
-        hop_requested_ = false;
+        if (audio.empty()) {
+            std::cout << "Received empty audio hop" << std::endl;
+            hop_requested_ = false;
+            return;
+        }
+
+        std::cout << "Received audio hop: " << audio.size() << " samples" << std::endl;
 
         // Push audio into ring buffer
-        for (float sample : audio) {
-            ring_buffer_[write_ptr_] = sample;
-            write_ptr_ = (write_ptr_ + 1) % RING_BUFFER_SIZE;
-
-            if (available_ < RING_BUFFER_SIZE) {
-                available_++;
-            } else {
-                // Buffer full, overwrite oldest
-                read_ptr_ = (read_ptr_ + 1) % RING_BUFFER_SIZE;
-            }
-        }
-    }
-
-    void clear_ring_buffer() {
-        std::fill(ring_buffer_.begin(), ring_buffer_.end(), 0.0f);
-        write_ptr_ = 0;
-        read_ptr_ = 0;
-        available_ = 0;
+        ring_buffer_.write(audio.data(), audio.size());
         hop_requested_ = false;
     }
 };
